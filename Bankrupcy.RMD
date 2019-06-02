@@ -28,7 +28,7 @@ corrplot(cor(bank.train[,-c(1,2,3)]), method = "circle")
 
 
 ### bank.glm0 - logit with all variables
-# build model
+# different link functions (logistic, probit, complementary log-log link) and compare.
 modellogit <- glm(DLRSN~.-FYEAR-CUSIP, family=binomial(link = "logit"), data=bank.train)
 modelprobit <- glm(DLRSN~.-FYEAR-CUSIP, family=binomial(link = "probit"), data=bank.train)
 modelcloglog <- glm(DLRSN~.-FYEAR-CUSIP, family=binomial(link = "cloglog"), data=bank.train)
@@ -36,7 +36,7 @@ summary(modellogit)
 summary(modelprobit)
 
 summary(modelcloglog)
-#Step-2:-
+#Step-2(Best model using logistic regression with AIC and BIC and LASSO variable selection. Draw ROC curve):-
 nullnodellogit <-  glm(DLRSN~1, family=binomial(link = "logit"), data=bank.train)
 #stepAIC
 step.aic.logit<-step(nullnodellogit, scope=list(lower=nullnodellogit, upper=modellogit), k = 2, direction="both")
@@ -100,7 +100,7 @@ summary(step.aic.logit)
   unlist(slot(performance(pred3, "auc"), "y.values"))
 
 
-#Step:3:
+#Step:3 (Test the out-of-sample performance):
   finalmodel <- glm(DLRSN~R2+R3+R6+R7+R9+R10, family=binomial(link = "logit"), data=bank.train)
   
 pred.test<- predict(finalmodel, newdata = bank.test, type="response")
@@ -113,7 +113,7 @@ unlist(slot(performance(pred4, "auc"), "y.values"))
 mc.table4 <- table(predict(step.aic.logit,type="response",newdata = bank.test) > mean(bank.train$DLRSN), bank.test$DLRSN, dnn=c("predicted", "actual"))
 mc.rate4 <- (mc.table4[2]+mc.table4[3])/nrow(bank.test)
 
-#Step-4:-
+#Step-4 (Grid Search):-
 
 finalmodel <- glm(DLRSN~R2+R3+R6+R7+R8+R9+R10, family=binomial(link = "logit"), data=bank.train)
 finalmodel.predict<-predict(finalmodel,type="response")
@@ -151,7 +151,7 @@ FPR<- sum(bank.train$DLRSN==0 & class.glm0.train.opt==1)/sum(bank.train$DLRSN==0
 FNR<- sum(bank.train$DLRSN==1 & class.glm0.train.opt==0)/sum(bank.train$DLRSN==1)
 cost<- costfunc(obs = bank.train$DLRSN, pred.p = finalmodel.predict, pcut = optimal.pcut.glm0)
 
-#Step-5
+#Step-5 (4-fold cross validation)
 library(boot)
 pcut=0.08
 finalmodel_alldata <- glm(DLRSN~R2+R3+R4+R6+R7+R8+R9+R10, family=binomial(link = "logit"), data=bankruptcy)
@@ -167,7 +167,7 @@ costfunc = function(obs, pred.p){
 cv.result<-cv.glm(data= bankruptcy,glmfit = finalmodel_alldata, K = 4, cost = costfunc)
 cv.result$delta[2]
 
-#step-6
+#step-6 (Classification tree with 35:1 asymmetric loss ratio)
 library(rpart)
 library(rpart.plot)
 bank_rpart<-rpart(DLRSN ~ . - CUSIP -FYEAR,bank.train,method = "class", parms = list(loss = matrix(c(0, 35, 1, 0), nrow = 2)))
@@ -192,8 +192,3 @@ mc.table.rpart <- table(predict(bank_rpart,bank.test,type="prob")[,2] > 1/36, ba
 mc.rate.rpart <- (mc.table.rpart[2]+mc.table.rpart[3])/nrow(bank.test)
 
 
-#Step-7
-modellogit <- glm(DLRSN~R2+R3+R4+R6+R7+R8+R9+R10, family=binomial(link = "logit"), data=bank.train)
-
-modellogit.train.pred<- table(predict(step.aic.logit,type="response",newdata = bank.train) > 0.08, bank.train$DLRSN, dnn=c("predicted", "actual"))
-modellogit.test.pred<-table(predict(step.aic.logit,type="response",newdata = bank.test) > 0.08, bank.test$DLRSN, dnn=c("predicted", "actual"))
