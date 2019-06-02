@@ -1,0 +1,199 @@
+set.seed(12988685)
+### load data
+bankruptcy <- read.csv("bankruptcy.csv")
+head(bankruptcy)
+str(bankruptcy)
+library(ROCR)
+
+
+### create 75% training data set
+index <- sample(nrow(bankruptcy), nrow(bankruptcy)*0.75)
+bank.train <- bankruptcy[index,]
+bank.test <- bankruptcy[-index,]
+
+### exploratory data analysis
+mean(bank.train$DLRSN) # proportion of default
+
+summary(bank.train)
+
+for (i in 1:ncol(bank.train)){ # box plot for each variable
+  xvar <- names(bank.train)[i]
+  if (is.numeric(bank.train[,i]) | is.integer(bank.train[,i])){
+    boxplot(bank.train[,i]~bank.train$DLRSN, main = xvar, xlab="DLRSN")
+  }
+}
+
+library(corrplot)
+corrplot(cor(bank.train[,-c(1,2,3)]), method = "circle")
+
+
+### bank.glm0 - logit with all variables
+# build model
+modellogit <- glm(DLRSN~.-FYEAR-CUSIP, family=binomial(link = "logit"), data=bank.train)
+modelprobit <- glm(DLRSN~.-FYEAR-CUSIP, family=binomial(link = "probit"), data=bank.train)
+modelcloglog <- glm(DLRSN~.-FYEAR-CUSIP, family=binomial(link = "cloglog"), data=bank.train)
+summary(modellogit)
+summary(modelprobit)
+
+summary(modelcloglog)
+#Step-2:-
+nullnodellogit <-  glm(DLRSN~1, family=binomial(link = "logit"), data=bank.train)
+#stepAIC
+step.aic.logit<-step(nullnodellogit, scope=list(lower=nullnodellogit, upper=modellogit), k = 2, direction="both")
+AIC(step.aic.logit)
+BIC(step.aic.logit)
+step.aic.logit$deviance
+# in sample performance
+mc.table <- table(predict(step.aic.logit,type="response") > mean(bank.train$DLRSN), bank.train$DLRSN, dnn=c("predicted", "actual"))
+mc.rate <- (mc.table[2]+mc.table[3])/nrow(bank.train)
+# ROC curve
+pred.step.train<- predict(step.aic.logit, type="response")
+pred <- prediction(pred.step.train, bank.train$DLRSN)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize=TRUE)
+# AUC
+unlist(slot(performance(pred, "auc"), "y.values"))
+
+#stepBIC
+
+step.bic.logit<-step(nullnodellogit, scope=list(lower=nullnodellogit, upper=modellogit),k=log(nrow(bank.train)),criterion="BIC", direction="both")
+AIC(step.bic.logit)
+BIC(step.bic.logit)
+step.bic.logit$deviance
+# in sample performance
+mc.table2 <- table(predict(step.bic.logit,type="response") > mean(bank.train$DLRSN), bank.train$DLRSN, dnn=c("predicted", "actual"))
+mc.rate2 <- (mc.table2[2]+mc.table2[3])/nrow(bank.train)
+# ROC curve
+pred.step.train2<- predict(step.bic.logit, type="response")
+pred2 <- prediction(pred.step.train2, bank.train$DLRSN)
+perf2 <- performance(pred2, "tpr", "fpr")
+plot(perf2, colorize=TRUE)
+# AUC
+unlist(slot(performance(pred2, "auc"), "y.values"))
+
+summary(step.aic.logit)
+#LASSO
+  library(glmnet)
+  lasso.logit<-glmnet(x=as.matrix(bank.train[,4:13]),y=bank.train[,"DLRSN"],alpha=1)
+  lasso.logit_fit<-cv.glmnet(x=as.matrix(bank.train[,4:13]),y=bank.train[,"DLRSN"],
+                             alpha=1,family="binomial",type.measure = "class")
+  plot(lasso.logit_fit)
+  plot(lasso.logit)
+  
+  coef(lasso.logit,s=lasso.logit_fit$lambda.min)
+  
+  model.lasso.logit<-glm(DLRSN~.-FYEAR-CUSIP-R1-R5,
+                         family=binomial(link = "logit"), data=bank.train)
+   
+  AIC(model.lasso.logit)
+  BIC(model.lasso.logit)
+  model.lasso.logit$deviance
+  # in sample performance
+  mc.table3 <- table(predict(model.lasso.logit,type="response") > mean(bank.train$DLRSN), bank.train$DLRSN, dnn=c("predicted", "actual"))
+  mc.rate3 <- (mc.table3[2]+mc.table3[3])/nrow(bank.train)
+  # ROC curve
+  pred.step.train3<- predict(model.lasso.logit, type="response")
+  pred3 <- prediction(pred.step.train3, bank.train$DLRSN)
+  perf3 <- performance(pred3, "tpr", "fpr")
+  plot(perf3, colorize=TRUE)
+  # AUC
+  unlist(slot(performance(pred3, "auc"), "y.values"))
+
+
+#Step:3:
+  finalmodel <- glm(DLRSN~R2+R3+R6+R7+R9+R10, family=binomial(link = "logit"), data=bank.train)
+  
+pred.test<- predict(finalmodel, newdata = bank.test, type="response")
+pred4 <- prediction(pred.test, bank.test$DLRSN)
+perf4 <- performance(pred4, "tpr", "fpr")
+plot(perf4, colorize=TRUE)
+unlist(slot(performance(pred4, "auc"), "y.values"))
+
+
+mc.table4 <- table(predict(step.aic.logit,type="response",newdata = bank.test) > mean(bank.train$DLRSN), bank.test$DLRSN, dnn=c("predicted", "actual"))
+mc.rate4 <- (mc.table4[2]+mc.table4[3])/nrow(bank.test)
+
+#Step-4:-
+
+finalmodel <- glm(DLRSN~R2+R3+R6+R7+R8+R9+R10, family=binomial(link = "logit"), data=bank.train)
+finalmodel.predict<-predict(finalmodel,type="response")
+costfunc = function(obs, pred.p, pcut){
+  weight1 = 15   # define the weight for "true=1 but pred=0" (FN)
+  weight0 = 1    # define the weight for "true=0 but pred=1" (FP)
+  c1 = (obs==1)&(pred.p<pcut)    # count for "true=1 but pred=0"   (FN)
+  c0 = (obs==0)&(pred.p>=pcut)   # count for "true=0 but pred=1"   (FP)
+  cost = mean(weight1*c1 + weight0*c0)  # misclassification with weight
+  return(cost) # you have to return to a value when you write R functions
+} # end of the function
+
+# define a sequence from 0.01 to 1 by 0.01
+p.seq <- seq(0.01, 1, 0.01) 
+
+# write a loop for all p-cut to see which one provides the smallest cost
+# first, need to define a 0 vector in order to save the value of cost from all pcut
+cost <- rep(0, length(p.seq))  
+for(i in 1:length(p.seq)){ 
+  cost[i] <- costfunc(obs = bank.train$DLRSN, pred.p = finalmodel.predict, pcut = p.seq[i])  
+} # end 
+
+# draw a plot with X axis being all pcut and Y axis being associated cost
+plot(p.seq, cost)
+# find the optimal pcut
+optimal.pcut.glm0 <- p.seq[which(cost==min(cost))]
+
+# step 1. get binary classification
+class.glm0.train.opt<- (finalmodel.predict>optimal.pcut.glm0)*1
+# step 2. get confusion matrix, MR, FPR, FNR
+table(class.glm0.train.opt, bank.train$DLRSN, dnn = c("predicted", "actual"))
+
+MR<- mean(bank.train$DLRSN!= class.glm0.train.opt)
+FPR<- sum(bank.train$DLRSN==0 & class.glm0.train.opt==1)/sum(bank.train$DLRSN==0)
+FNR<- sum(bank.train$DLRSN==1 & class.glm0.train.opt==0)/sum(bank.train$DLRSN==1)
+cost<- costfunc(obs = bank.train$DLRSN, pred.p = finalmodel.predict, pcut = optimal.pcut.glm0)
+
+#Step-5
+library(boot)
+pcut=0.08
+finalmodel_alldata <- glm(DLRSN~R2+R3+R4+R6+R7+R8+R9+R10, family=binomial(link = "logit"), data=bankruptcy)
+
+costfunc = function(obs, pred.p){
+  weight1 = 35   # define the weight for "true=1 but pred=0" (FN)
+  weight0 = 1    # define the weight for "true=0 but pred=1" (FP)
+  c1 = (obs==1)&(pred.p<pcut)    # count for "true=1 but pred=0"   (FN)
+  c0 = (obs==0)&(pred.p>=pcut)   # count for "true=0 but pred=1"   (FP)
+  cost = mean(weight1*c1 + weight0*c0)  # misclassification with weight
+  return(cost) # you have to return to a value when you write R functions
+}
+cv.result<-cv.glm(data= bankruptcy,glmfit = finalmodel_alldata, K = 4, cost = costfunc)
+cv.result$delta[2]
+
+#step-6
+library(rpart)
+library(rpart.plot)
+bank_rpart<-rpart(DLRSN ~ . - CUSIP -FYEAR,bank.train,method = "class", parms = list(loss = matrix(c(0, 35, 1, 0), nrow = 2)))
+prp(bank_rpart,extra=1)
+bank.test.pred.tree1 = predict(bank_rpart, bank.test, type = "class")
+bank.train.pred.tree1 = predict(bank_rpart, bank.train, type = "class")
+table(bank.test$DLRSN, bank.test.pred.tree1, dnn = c("Truth", "Predicted"))
+table(bank.train$DLRSN,bank.train.pred.tree1, dnn = c("Truth", "Predicted"))
+
+## in sample misclassification rate
+mean(bank.test.pred.tree1!= bank.test$DLRSN)
+mean(bank.train.pred.tree1!= bank.train$DLRSN)
+
+bank.test.prob.rpart3 = predict(bank_rpart, bank.train, type = "prob")
+pred = prediction(bank.test.prob.rpart3[,2], bank.test$DLRSN)
+perf = performance(pred, "tpr", "fpr")
+plot(perf, colorize = TRUE)
+
+slot(performance(pred, "auc"), "y.values")[[1]]
+
+mc.table.rpart <- table(predict(bank_rpart,bank.test,type="prob")[,2] > 1/36, bank.test$DLRSN, dnn=c("predicted", "actual"))
+mc.rate.rpart <- (mc.table.rpart[2]+mc.table.rpart[3])/nrow(bank.test)
+
+
+#Step-7
+modellogit <- glm(DLRSN~R2+R3+R4+R6+R7+R8+R9+R10, family=binomial(link = "logit"), data=bank.train)
+
+modellogit.train.pred<- table(predict(step.aic.logit,type="response",newdata = bank.train) > 0.08, bank.train$DLRSN, dnn=c("predicted", "actual"))
+modellogit.test.pred<-table(predict(step.aic.logit,type="response",newdata = bank.test) > 0.08, bank.test$DLRSN, dnn=c("predicted", "actual"))
